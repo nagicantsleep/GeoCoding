@@ -25,7 +25,19 @@ func NewReverseGeocodeHandler(svc GeoCodingService) *ReverseGeocodeHandler {
 	return &ReverseGeocodeHandler{service: svc}
 }
 
-// ReverseGeocode handles GET /reverse-geocode requests
+// ReverseGeocode godoc
+// @Summary Reverse geocode coordinates
+// @Description Convert geographic coordinates to an address
+// @Tags geocoding
+// @Accept json
+// @Produce json
+// @Param lat query number true "Latitude"
+// @Param lon query number true "Longitude"
+// @Success 200 {object} models.Location
+// @Failure 400 {object} map[string]string "error":"missing required query parameters 'lat' and 'lon'" or "invalid latitude format" or "invalid longitude format"
+// @Failure 404 {object} map[string]string "error":"no address found near the specified coordinates"
+// @Failure 500 {object} map[string]string "error":"internal server error"
+// @Router /reverse-geocode [get]
 func (h *ReverseGeocodeHandler) ReverseGeocode(c *gin.Context) {
 	latStr := c.Query("lat")
 	lonStr := c.Query("lon")

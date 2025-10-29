@@ -1,4 +1,4 @@
-.PHONY: build run docker-build docker-run docker-clean
+.PHONY: build run docker-build docker-run docker-clean swag-install swag-gen
 
 build:
 	@echo "Building..."
@@ -21,3 +21,11 @@ docker-clean:
 	@docker stop geocoding-api-container 2>/dev/null || true
 	@docker rm geocoding-api-container 2>/dev/null || true
 	@docker rmi geocoding-api 2>/dev/null || true
+
+swag-install:
+	@echo "Installing swag CLI tool..."
+	@go install github.com/swaggo/swag/cmd/swag@latest
+
+swag-gen:
+	@echo "Generating OpenAPI documentation..."
+	@swag init -g ./cmd/api/main.go -o ./docs

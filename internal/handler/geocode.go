@@ -24,7 +24,17 @@ func NewGeoCodeHandler(svc GeoCodeService) *GeoCodeHandler {
 	return &GeoCodeHandler{service: svc}
 }
 
-// Geocode handles GET /geocode requests
+// Geocode godoc
+// @Summary Geocode an address
+// @Description Convert an address string to geographic coordinates
+// @Tags geocoding
+// @Accept json
+// @Produce json
+// @Param q query string true "Address to geocode"
+// @Success 200 {array} models.Location
+// @Failure 400 {object} map[string]string "error":"missing required query parameter 'q'"
+// @Failure 500 {object} map[string]string "error":"internal server error"
+// @Router /geocode [get]
 func (h *GeoCodeHandler) GeoCode(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {

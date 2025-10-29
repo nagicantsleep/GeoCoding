@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"geocoding-api/internal/config"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -24,25 +25,21 @@ type LocationRecord struct {
 
 func main() {
 	file := flag.String("file", "", "Path to the CSV file to import")
+	directory := flag.String("directory", "", "Path to the directory containing CSV files to import")
 	flag.Parse()
 
-	if *file == "" {
-		fmt.Println("Error: --file flag is required")
+	if *file == "" && *directory == "" {
+		fmt.Println("Error: either --file or --directory flag is required")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Starting import from file: %s\n", *file)
-
-	records, err := parseCSV(*file)
-	if err != nil {
-		fmt.Printf("Error parsing CSV: %v\n", err)
+	if *file != "" && *directory != "" {
+		fmt.Println("Error: cannot specify both --file and --directory flags")
 		os.Exit(1)
 	}
-
-	fmt.Printf("Parsed %d records\n", len(records))
 
 	// Load config
-	cfg, err := config.LoadConfig("configs")
+	cfg, err := config.LoadConfig(filepath.Join(".", "configs"))
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
@@ -56,28 +53,103 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	// Ensure table exists
-	err = createTableIfNotExists(conn)
+	// Ensure tables exist
+	err = createTablesIfNotExists(conn)
 	if err != nil {
-		fmt.Printf("Error creating table: %v\n", err)
+		fmt.Printf("Error creating tables: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Insert records
-	err = insertRecords(conn, records)
-	if err != nil {
-		fmt.Printf("Error inserting records: %v\n", err)
-		os.Exit(1)
-	}
+	var totalRecords int
+	var processedFiles int
+	var failedFiles int
 
-	// Verify data
-	err = verifyImport(conn, len(records))
-	if err != nil {
-		fmt.Printf("Error verifying import: %v\n", err)
-		os.Exit(1)
-	}
+	if *file != "" {
+		// Single file import (backward compatibility)
+		fmt.Printf("Starting import from file: %s\n", *file)
 
-	fmt.Printf("Successfully imported %d records\n", len(records))
+		records, err := parseCSV(*file)
+		if err != nil {
+			fmt.Printf("Error parsing CSV: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Parsed %d records\n", len(records))
+
+		// Insert records
+		err = insertRecords(conn, records)
+		if err != nil {
+			fmt.Printf("Error inserting records: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Verify data
+		err = verifyImport(conn, len(records))
+		if err != nil {
+			fmt.Printf("Error verifying import: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Successfully imported %d records\n", len(records))
+	} else {
+		// Directory import
+		fmt.Printf("Starting import from directory: %s\n", *directory)
+
+		files, err := findCSVFiles(*directory)
+		if err != nil {
+			fmt.Printf("Error finding CSV files: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Found %d CSV files to process\n", len(files))
+
+		for _, filePath := range files {
+			fmt.Printf("Processing file: %s\n", filePath)
+
+			// Check if file has been processed
+			processed, err := isFileProcessed(conn, filePath)
+			if err != nil {
+				fmt.Printf("Error checking if file processed: %v\n", err)
+				failedFiles++
+				continue
+			}
+
+			if processed {
+				fmt.Printf("Skipping already processed file: %s\n", filePath)
+				continue
+			}
+
+			records, err := parseCSV(filePath)
+			if err != nil {
+				fmt.Printf("Error parsing CSV %s: %v\n", filePath, err)
+				failedFiles++
+				continue
+			}
+
+			fmt.Printf("Parsed %d records from %s\n", len(records), filePath)
+
+			// Insert records
+			err = insertRecords(conn, records)
+			if err != nil {
+				fmt.Printf("Error inserting records from %s: %v\n", filePath, err)
+				failedFiles++
+				continue
+			}
+
+			// Mark file as processed
+			err = markFileProcessed(conn, filePath, len(records))
+			if err != nil {
+				fmt.Printf("Error marking file as processed: %v\n", err)
+				// Don't increment failedFiles here as the data was inserted successfully
+			}
+
+			totalRecords += len(records)
+			processedFiles++
+			fmt.Printf("Successfully processed %s (%d records)\n", filePath, len(records))
+		}
+
+		fmt.Printf("Directory import completed: %d files processed, %d files failed, %d total records imported\n", processedFiles, failedFiles, totalRecords)
+	}
 }
 
 func parseCSV(filePath string) ([]LocationRecord, error) {
@@ -136,8 +208,9 @@ func parseCSV(filePath string) ([]LocationRecord, error) {
 	return records, nil
 }
 
-func createTableIfNotExists(conn *pgx.Conn) error {
-	query := `
+func createTablesIfNotExists(conn *pgx.Conn) error {
+	// Create locations table
+	locationsQuery := `
 	CREATE TABLE IF NOT EXISTS locations (
 		id BIGSERIAL PRIMARY KEY,
 		prefecture VARCHAR(255),
@@ -146,14 +219,29 @@ func createTableIfNotExists(conn *pgx.Conn) error {
 		address_2 VARCHAR(255),
 		block_lot VARCHAR(255),
 		full_address_tsvector TSVECTOR GENERATED ALWAYS AS (
-			to_tsvector('japanese', prefecture || municipality || address_1 || address_2)
+			to_tsvector('japanese', prefecture || ' ' || municipality || ' ' || address_1 || ' ' || address_2)
 		) STORED,
 		geom GEOGRAPHY(POINT, 4326)
 	);
 	CREATE INDEX IF NOT EXISTS locations_geom_idx ON locations USING GIST (geom);
 	CREATE INDEX IF NOT EXISTS locations_full_address_tsvector_idx ON locations USING GIN (full_address_tsvector);
 	`
-	_, err := conn.Exec(context.Background(), query)
+	_, err := conn.Exec(context.Background(), locationsQuery)
+	if err != nil {
+		return err
+	}
+
+	// Create processed_files table
+	processedFilesQuery := `
+	CREATE TABLE IF NOT EXISTS processed_files (
+		id BIGSERIAL PRIMARY KEY,
+		file_path TEXT UNIQUE NOT NULL,
+		processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+		record_count INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS processed_files_path_idx ON processed_files (file_path);
+	`
+	_, err = conn.Exec(context.Background(), processedFilesQuery)
 	return err
 }
 
@@ -179,8 +267,8 @@ func verifyImport(conn *pgx.Conn, expectedCount int) error {
 		return fmt.Errorf("failed to count records: %w", err)
 	}
 
-	if count != expectedCount {
-		return fmt.Errorf("record count mismatch: expected %d, got %d", expectedCount, count)
+	if count < expectedCount {
+		return fmt.Errorf("record count mismatch: expected at least %d, got %d", expectedCount, count)
 	}
 
 	// Check a sample geom
@@ -191,5 +279,35 @@ func verifyImport(conn *pgx.Conn, expectedCount int) error {
 	}
 
 	fmt.Printf("Sample geom: %s\n", geom)
+	fmt.Printf("✓ Verified: %d total records in database (imported %d new records)\n", count, expectedCount)
 	return nil
+}
+
+func findCSVFiles(directory string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filepath.Ext(path) == ".csv" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}
+
+func isFileProcessed(conn *pgx.Conn, filePath string) (bool, error) {
+	var exists bool
+	err := conn.QueryRow(context.Background(),
+		"SELECT EXISTS(SELECT 1 FROM processed_files WHERE file_path = $1)",
+		filePath).Scan(&exists)
+	return exists, err
+}
+
+func markFileProcessed(conn *pgx.Conn, filePath string, recordCount int) error {
+	_, err := conn.Exec(context.Background(),
+		"INSERT INTO processed_files (file_path, record_count) VALUES ($1, $2) ON CONFLICT (file_path) DO NOTHING",
+		filePath, recordCount)
+	return err
 }
