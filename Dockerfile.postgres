@@ -1,0 +1,15 @@
+# Custom PostgreSQL Image with PostGIS Extension
+# Base image: PostgreSQL 15 with PostGIS 3.4 already installed
+FROM postgis/postgis:15-3.4
+
+# Copy initialization script to enable extensions
+COPY scripts/setup-db.sql /docker-entrypoint-initdb.d/
+
+# Set proper permissions
+RUN chmod 755 /docker-entrypoint-initdb.d/setup-db.sql
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# Use default PostgreSQL entrypoint
+# Extensions will be enabled during database initialization

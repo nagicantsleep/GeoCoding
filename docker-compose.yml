@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: geocoding-postgres
+    environment:
+      POSTGRES_DB: geocode
+      POSTGRES_USER: sa
+      POSTGRES_PASSWORD: sa
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/setup-db.sql:/docker-entrypoint-initdb.d/setup-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sa -d geocode"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  geocoding-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geocoding-api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: geocode
+      DB_USER: sa
+      DB_PASSWORD: sa
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

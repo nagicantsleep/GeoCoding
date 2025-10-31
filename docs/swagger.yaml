@@ -1,0 +1,116 @@
+basePath: /
+definitions:
+  models.Location:
+    properties:
+      address1:
+        type: string
+      address2:
+        type: string
+      block_lot:
+        type: string
+      id:
+        type: integer
+      latitude:
+        type: number
+      longitude:
+        type: number
+      municipality:
+        type: string
+      prefecture:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: A geocoding service API for Japanese addresses
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Geocoding API
+  version: "1.0"
+paths:
+  /geocode:
+    get:
+      consumes:
+      - application/json
+      description: Convert an address string to geographic coordinates
+      parameters:
+      - description: Address to geocode
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Location'
+            type: array
+        "400":
+          description: error":"missing required query parameter 'q'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: error":"internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Geocode an address
+      tags:
+      - geocoding
+  /reverse-geocode:
+    get:
+      consumes:
+      - application/json
+      description: Convert geographic coordinates to an address
+      parameters:
+      - description: Latitude
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude
+        in: query
+        name: lon
+        required: true
+        type: number
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Location'
+        "400":
+          description: error":"missing required query parameters 'lat' and 'lon'"
+            or "invalid latitude format" or "invalid longitude format
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: error":"no address found near the specified coordinates
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: error":"internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Reverse geocode coordinates
+      tags:
+      - geocoding
+swagger: "2.0"
